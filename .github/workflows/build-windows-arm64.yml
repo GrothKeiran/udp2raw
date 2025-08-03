@@ -37,133 +37,152 @@ jobs:
       run: |
         Write-Host "=== Source files ==="
         Get-ChildItem -Path . -Filter "*.cpp" | ForEach-Object { Write-Host $_.Name }
-        Get-ChildItem -Path "lib" -Filter "*.cpp" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "lib/$($_.Name)" }
+        if (Test-Path "lib") {
+            Get-ChildItem -Path "lib" -Filter "*.cpp" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "lib/$($_.Name)" }
+        }
     
     - name: Create build directories
       shell: powershell
       run: |
         New-Item -ItemType Directory -Force -Path "build"
     
-    - name: Manual compilation
-      shell: powershell
+    - name: Manual compilation with CMD
+      shell: cmd
       run: |
-        Write-Host "Setting up compilation environment..."
+        echo Setting up Visual Studio environment...
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64_arm64
         
-        # 查找 Visual Studio 安装路径
-        $vsPath = Get-ChildItem "C:\Program Files\Microsoft Visual Studio\2022" | Select-Object -First 1
-        $vsFullPath = $vsPath.FullName
-        Write-Host "VS Path: $vsFullPath"
+        echo Checking environment...
+        where cl.exe
+        where link.exe
         
-        # 设置编译器路径
-        $compilerPath = "$vsFullPath\VC\Tools\MSVC"
-        $compilerVersion = Get-ChildItem $compilerPath | Sort-Object Name -Descending | Select-Object -First 1
-        $compilerFullPath = "$($compilerVersion.FullName)\bin\Hostx64\arm64"
-        Write-Host "Compiler path: $compilerFullPath"
+        echo Creating object files...
+        if not exist build mkdir build
         
-        # Windows SDK 路径
-        $sdkPath = "C:\Program Files (x86)\Windows Kits\10"
-        $sdkVersion = Get-ChildItem "$sdkPath\Include" | Where-Object { $_.Name -like "10.0.*" } | Sort-Object Name -Descending | Select-Object -First 1
-        Write-Host "SDK Version: $($sdkVersion.Name)"
+        echo Compiling main.cpp...
+        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+               /I"C:\npcap-sdk\Include" ^
+               /c main.cpp /Fo"build\main.obj"
+        if errorlevel 1 goto :error
         
-        # 编译参数
-        $includes = @(
-            "/I`"C:\npcap-sdk\Include`""
-            "/I`"$($compilerVersion.FullName)\include`""
-            "/I`"$sdkPath\Include\$($sdkVersion.Name)\um`""
-            "/I`"$sdkPath\Include\$($sdkVersion.Name)\shared`""
-            "/I`"$sdkPath\Include\$($sdkVersion.Name)\ucrt`""
+        echo Compiling common.cpp...
+        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+               /I"C:\npcap-sdk\Include" ^
+               /c common.cpp /Fo"build\common.obj"
+        if errorlevel 1 goto :error
+        
+        echo Compiling log.cpp...
+        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+               /I"C:\npcap-sdk\Include" ^
+               /c log.cpp /Fo"build\log.obj"
+        if errorlevel 1 goto :error
+        
+        echo Compiling network.cpp...
+        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+               /I"C:\npcap-sdk\Include" ^
+               /c network.cpp /Fo"build\network.obj"
+        if errorlevel 1 goto :error
+        
+        echo Compiling misc.cpp...
+        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+               /I"C:\npcap-sdk\Include" ^
+               /c misc.cpp /Fo"build\misc.obj"
+        if errorlevel 1 goto :error
+        
+        echo Compiling fd_manager.cpp...
+        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+               /I"C:\npcap-sdk\Include" ^
+               /c fd_manager.cpp /Fo"build\fd_manager.obj"
+        if errorlevel 1 goto :error
+        
+        echo Compiling client.cpp...
+        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+               /I"C:\npcap-sdk\Include" ^
+               /c client.cpp /Fo"build\client.obj"
+        if errorlevel 1 goto :error
+        
+        echo Compiling server.cpp...
+        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+               /I"C:\npcap-sdk\Include" ^
+               /c server.cpp /Fo"build\server.obj"
+        if errorlevel 1 goto :error
+        
+        echo Compiling my_ev.cpp...
+        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+               /I"C:\npcap-sdk\Include" ^
+               /c my_ev.cpp /Fo"build\my_ev.obj"
+        if errorlevel 1 goto :error
+        
+        echo Compiling packet.cpp...
+        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+               /I"C:\npcap-sdk\Include" ^
+               /c packet.cpp /Fo"build\packet.obj"
+        if errorlevel 1 goto :error
+        
+        echo Compiling encrypt.cpp...
+        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+               /I"C:\npcap-sdk\Include" ^
+               /c encrypt.cpp /Fo"build\encrypt.obj"
+        if errorlevel 1 goto :error
+        
+        echo Compiling connection.cpp...
+        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+               /I"C:\npcap-sdk\Include" ^
+               /c connection.cpp /Fo"build\connection.obj"
+        if errorlevel 1 goto :error
+        
+        echo Compiling lib files...
+        if exist "lib\aes.cpp" (
+            cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+                   /I"C:\npcap-sdk\Include" ^
+                   /c lib\aes.cpp /Fo"build\aes.obj"
+            if errorlevel 1 goto :error
         )
         
-        $defines = @(
-            "/DWIN32"
-            "/DNDEBUG"
-            "/D_CONSOLE"
-            "/D_CRT_SECURE_NO_WARNINGS"
+        if exist "lib\des.cpp" (
+            cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+                   /I"C:\npcap-sdk\Include" ^
+                   /c lib\des.cpp /Fo"build\des.obj"
+            if errorlevel 1 goto :error
         )
         
-        $cflags = @(
-            "/O2"
-            "/MT"
-            "/EHsc"
-            "/W3"
-            "/nologo"
+        if exist "lib\md5.cpp" (
+            cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+                   /I"C:\npcap-sdk\Include" ^
+                   /c lib\md5.cpp /Fo"build\md5.obj"
+            if errorlevel 1 goto :error
         )
         
-        # 获取源文件列表
-        $mainSources = @(
-            "main.cpp"
-            "common.cpp"
-            "log.cpp"
-            "network.cpp"
-            "misc.cpp"
-            "fd_manager.cpp"
-            "client.cpp"
-            "server.cpp"
-            "my_ev.cpp"
-            "packet.cpp"
-            "encrypt.cpp"
-            "connection.cpp"
+        if exist "lib\pbkdf2-sha1.cpp" (
+            cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+                   /I"C:\npcap-sdk\Include" ^
+                   /c lib\pbkdf2-sha1.cpp /Fo"build\pbkdf2-sha1.obj"
+            if errorlevel 1 goto :error
         )
         
-        $libSources = @()
-        if (Test-Path "lib") {
-            $libSources = Get-ChildItem "lib" -Filter "*.cpp" | ForEach-Object { "lib\$($_.Name)" }
-        }
-        
-        $allSources = $mainSources + $libSources
-        $objFiles = @()
-        
-        # 编译每个源文件
-        foreach ($source in $allSources) {
-            if (Test-Path $source) {
-                $basename = [System.IO.Path]::GetFileNameWithoutExtension($source)
-                $objFile = "build\$basename.obj"
-                $objFiles += $objFile
-                
-                $compileCmd = "`"$compilerFullPath\cl.exe`" $($includes -join ' ') $($defines -join ' ') $($cflags -join ' ') /c `"$source`" /Fo`"$objFile`""
-                Write-Host "Compiling: $source"
-                
-                try {
-                    Invoke-Expression $compileCmd
-                    if ($LASTEXITCODE -ne 0) {
-                        Write-Host "Compilation failed for $source"
-                        exit 1
-                    }
-                } catch {
-                    Write-Host "Error compiling $source`: $($_.Exception.Message)"
-                    exit 1
-                }
-            } else {
-                Write-Host "Warning: Source file not found: $source"
-            }
-        }
-        
-        # 链接
-        Write-Host "Linking executable..."
-        $libs = @(
-            "/LIBPATH:`"C:\npcap-sdk\Lib\ARM64`""
-            "/LIBPATH:`"$($compilerVersion.FullName)\lib\arm64`""
-            "/LIBPATH:`"$sdkPath\Lib\$($sdkVersion.Name)\um\arm64`""
-            "/LIBPATH:`"$sdkPath\Lib\$($sdkVersion.Name)\ucrt\arm64`""
-            "wpcap.lib"
-            "ws2_32.lib"
-            "iphlpapi.lib"
-            "kernel32.lib"
-            "user32.lib"
+        if exist "lib\pbkdf2-sha256.cpp" (
+            cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+                   /I"C:\npcap-sdk\Include" ^
+                   /c lib\pbkdf2-sha256.cpp /Fo"build\pbkdf2-sha256.obj"
+            if errorlevel 1 goto :error
         )
         
-        $linkCmd = "`"$compilerFullPath\link.exe`" /NOLOGO /SUBSYSTEM:CONSOLE /OUT:`"udp2raw_arm64.exe`" $($objFiles -join ' ') $($libs -join ' ')"
+        echo Linking executable...
+        link.exe /NOLOGO /SUBSYSTEM:CONSOLE ^
+                 /LIBPATH:"C:\npcap-sdk\Lib\ARM64" ^
+                 /OUT:"udp2raw_arm64.exe" ^
+                 build\*.obj ^
+                 wpcap.lib ws2_32.lib iphlpapi.lib kernel32.lib user32.lib
+        if errorlevel 1 goto :error
         
-        try {
-            Invoke-Expression $linkCmd
-            if ($LASTEXITCODE -ne 0) {
-                Write-Host "Linking failed"
-                exit 1
-            }
-        } catch {
-            Write-Host "Error during linking: $($_.Exception.Message)"
-            exit 1
-        }
+        echo Build successful!
+        goto :end
+        
+        :error
+        echo Build failed!
+        exit /b 1
+        
+        :end
     
     - name: Verify executable
       shell: powershell
@@ -178,8 +197,6 @@ jobs:
             Write-Host "ERROR: Executable not found!"
             Write-Host "Build directory contents:"
             Get-ChildItem "build" -ErrorAction SilentlyContinue
-            Write-Host "Current directory contents:"
-            Get-ChildItem "." -Filter "*.exe"
             exit 1
         }
     
@@ -189,13 +206,3 @@ jobs:
         name: udp2raw-windows-arm64
         path: udp2raw_arm64.exe
         retention-days: 30
-    
-    - name: Show final message
-      shell: powershell
-      run: |
-        Write-Host "================================================"
-        Write-Host "Build completed successfully!"
-        Write-Host "You can download the executable from the Artifacts section."
-        Write-Host "File name: udp2raw_arm64.exe"
-        Write-Host "This version should support server mode (-s) for Windows ARM64."
-        Write-Host "================================================"
