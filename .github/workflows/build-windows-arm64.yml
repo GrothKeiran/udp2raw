@@ -9,7 +9,7 @@ on:
 
 jobs:
   build-windows-arm64:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     
     steps:
     - name: Checkout code
@@ -17,52 +17,27 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Setup MSYS2
-      uses: msys2/setup-msys2@v2
-      with:
-        msystem: MINGW64
-        update: true
-        install: >-
-          base-devel
-          git
-          make
-          mingw-w64-x86_64-toolchain
-          mingw-w64-x86_64-gcc
-          mingw-w64-cross-gcc
-          mingw-w64-cross-binutils
-
-    - name: Install ARM64 cross compiler
-      shell: msys2 {0}
+    - name: Install ARM64 Windows cross compiler
       run: |
-        # 下载并安装llvm-mingw交叉编译工具链
-        curl -L -o llvm-mingw.tar.xz https://github.com/mstorsjo/llvm-mingw/releases/download/20231128/llvm-mingw-20231128-ucrt-x86_64.tar.xz
-        tar -xf llvm-mingw.tar.xz
-        mv llvm-mingw-* /c/llvm-mingw
-        
-        # 验证安装
-        /c/llvm-mingw/bin/aarch64-w64-mingw32-gcc --version
+        sudo apt-get update
+        sudo apt-get install -y gcc-mingw-w64-aarch64 g++-mingw-w64-aarch64
 
     - name: Build udp2raw for Windows ARM64
-      shell: msys2 {0}
       run: |
-        # 添加交叉编译器到PATH
-        export PATH="/c/llvm-mingw/bin:$PATH"
-        
         # 设置交叉编译环境变量
         export CC=aarch64-w64-mingw32-gcc
         export CXX=aarch64-w64-mingw32-g++
         export AR=aarch64-w64-mingw32-ar
         export STRIP=aarch64-w64-mingw32-strip
-        export RANLIB=aarch64-w64-mingw32-ranlib
         
-        # 验证编译器可用
-        which $CC
+        # 验证编译器
         $CC --version
+        $CXX --version
         
         # 生成版本信息
         echo "const char * gitversion=\"$(git describe --tags --always --dirty)\";" > git_version.h
         
-        # 直接编译所有源文件
+        # 编译
         $CXX -static -O2 -std=c++11 \
           -DUDP2RAW_VERSION=\"$(git describe --tags --always)\" \
           -I. \
@@ -86,30 +61,17 @@ jobs:
           -lws2_32 -lwinmm -static-libgcc -static-libstdc++ \
           -Wl,--gc-sections -s
         
-        # 验证文件生成
+        # 验证文件
         if [ -f "udp2raw_windows_arm64.exe" ]; then
-          echo "Build successful!"
+          echo "✅ Build successful!"
           ls -lh udp2raw_windows_arm64.exe
           file udp2raw_windows_arm64.exe
         else
-          echo "Build failed - no exe file generated"
+          echo "❌ Build failed"
           exit 1
         fi
 
-    - name: Test executable (basic check)
-      shell: cmd
-      run: |
-        REM 只做基本的文件检查，因为ARM64程序无法在x64 runner上运行
-        if exist udp2raw_windows_arm64.exe (
-          echo File exists and has size:
-          dir udp2raw_windows_arm64.exe
-        ) else (
-          echo ERROR: Executable not found
-          exit /b 1
-        )
-
     - name: Create release info
-      shell: msys2 {0}
       run: |
         echo "Build Date: $(date)" > release_info.txt
         echo "Commit: $(git rev-parse HEAD)" >> release_info.txt
@@ -148,7 +110,7 @@ jobs:
           
           **Build Info:**
           - Target: Windows ARM64
-          - Compiler: LLVM-MinGW
+          - Compiler: GCC MinGW-w64
           - Static linking: Yes
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
