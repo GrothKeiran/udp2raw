@@ -12,38 +12,32 @@ jobs:
     runs-on: windows-latest
 
     steps:
+    # 步骤 1：检出代码
     - name: Checkout repository
       uses: actions/checkout@v4
 
     # 步骤 2：安装正确的交叉编译工具链
-    # 我们使用 MINGW64 环境，因为它是在 x86_64 主机上运行的。
-    # 然后我们安装一个可以生成 aarch64 (ARM64) 代码的 Clang 工具链。
     - name: Setup MSYS2 cross-compilation environment
       uses: msys2/setup-msys2@v2
       with:
-        msystem: MINGW64 # 宿主环境是 x86_64
+        msystem: MINGW64
         update: true
+        # 移除了所有行内注释，以避免被当作包名传递给 pacman
         install: >-
           make
           cmake
-          mingw-w64-x86_64-clang # 安装能在 x86_64 上运行的 Clang
-          mingw-w64-x86_64-lld   # 安装链接器
+          mingw-w64-x86_64-clang
+          mingw-w64-x86_64-lld
           mingw-w64-x86_64-compiler-rt
 
     # 步骤 3：编译 udp2raw
     - name: Build udp2raw for ARM64
-      # 使用 MINGW64 shell
       shell: msys2 {0}
       run: |
         # 创建构建目录
         mkdir build && cd build
         
-        # 运行 CMake 配置项目
-        # -DCMAKE_SYSTEM_NAME=Windows：告知 CMake 我们正在为 Windows 系统编译
-        # -DCMAKE_SYSTEM_PROCESSOR=aarch64：指定目标 CPU 架构
-        # -DCMAKE_C_COMPILER=clang：明确指定使用 clang 作为 C 编译器
-        # -DCMAKE_CXX_COMPILER=clang++：明确指定使用 clang++ 作为 C++ 编译器
-        # --target=aarch64-w64-mingw32：这是传递给 Clang 的关键参数，告诉它生成 ARM64 代码
+        # 运行 CMake 配置交叉编译项目
         cmake .. -DCMAKE_SYSTEM_NAME=Windows \
                  -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
                  -DCMAKE_C_COMPILER=clang \
