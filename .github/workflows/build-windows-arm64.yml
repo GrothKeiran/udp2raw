@@ -1,9 +1,7 @@
 # .github/workflows/build-windows-x64.yml
 
-# 工作流程名称
 name: Build udp2raw for Windows x64 (Server Mode)
 
-# 触发条件：手动触发或推送到主分支
 on:
   workflow_dispatch:
   push:
@@ -11,20 +9,18 @@ on:
 
 jobs:
   build:
-    # 使用标准的 Windows 虚拟机环境
     runs-on: windows-latest
 
     steps:
-    # 步骤 1：检出您的代码
+    # 步骤 1：检出代码
     - name: Checkout repository
       uses: actions/checkout@v4
 
     # 步骤 2：设置 MSYS2 环境
-    # 这是在 Windows 上进行编译的标准环境
     - name: Setup MSYS2
       uses: msys2/setup-msys2@v2
       with:
-        msystem: MINGW64 # 使用标准的 64 位环境
+        msystem: MINGW64
         update: true
         install: >-
           make
@@ -33,29 +29,24 @@ jobs:
 
     # 步骤 3：编译 udp2raw
     - name: Build udp2raw for x64
-      # 使用 MINGW64 shell
       shell: msys2 {0}
       run: |
         # 创建构建目录
         mkdir build && cd build
         
         # 运行 CMake 配置项目
-        # -DENABLE_SERVER=ON: 明确启用服务器模式
-        # -DENABLE_CLIENT=OFF: 禁用客户端模式，确保只编译服务器功能
-        # -G "MinGW Makefiles": 在 MINGW64 环境下，这是最合适的生成器
-        cmake .. -G "MinGW Makefiles" -DENABLE_SERVER=ON -DENABLE_CLIENT=OFF
+        # 核心修改：移除了 -G "MinGW Makefiles" 参数。
+        # CMake 会自动选择当前环境可用的生成器（如 "Unix Makefiles"）。
+        cmake .. -DENABLE_SERVER=ON -DENABLE_CLIENT=OFF
                  
         # 执行编译
         make
 
-    # 步骤 4：上传编译好的可执行文件
+    # 步骤 4：上传编译产物
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        # 构建产物的名称
         name: udp2raw-windows-x64-server
-        # 要上传的文件路径
         path: build/udp2raw.exe
-        # 如果找不到文件则报错，确保我们拿到了编译产物
         if-no-files-found: error
 
