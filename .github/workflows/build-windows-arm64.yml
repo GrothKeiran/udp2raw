@@ -1,4 +1,4 @@
-name: Build udp2raw Windows ARM64
+name: Build udp2raw Windows ARM64 (MinGW)
 
 on:
   push:
@@ -8,201 +8,73 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-windows-arm64:
-    runs-on: windows-latest
+  build-with-mingw:
+    runs-on: ubuntu-latest
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Setup Visual Studio
-      uses: microsoft/setup-msbuild@v1.3
-    
-    - name: Download Npcap SDK
-      shell: powershell
+    - name: Install dependencies
       run: |
-        Write-Host "Downloading Npcap SDK..."
-        Invoke-WebRequest -Uri "https://npcap.com/dist/npcap-sdk-1.13.zip" -OutFile "npcap-sdk.zip"
-        Expand-Archive -Path "npcap-sdk.zip" -DestinationPath "C:\npcap-sdk" -Force
-        
-        if (Test-Path "C:\npcap-sdk\Include\pcap.h") {
-            Write-Host "Npcap SDK installed successfully"
-        } else {
-            Write-Host "Npcap SDK installation failed"
-            exit 1
-        }
+        sudo apt-get update
+        sudo apt-get install -y \
+          gcc-aarch64-linux-gnu \
+          g++-aarch64-linux-gnu \
+          build-essential \
+          wget \
+          unzip
     
-    - name: List source files
-      shell: powershell
+    - name: Download WinPcap SDK
       run: |
-        Write-Host "=== Source files ==="
-        Get-ChildItem -Path . -Filter "*.cpp" | ForEach-Object { Write-Host $_.Name }
-        if (Test-Path "lib") {
-            Get-ChildItem -Path "lib" -Filter "*.cpp" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "lib/$($_.Name)" }
-        }
+        wget -O npcap-sdk.zip "https://npcap.com/dist/npcap-sdk-1.13.zip"
+        unzip npcap-sdk.zip -d npcap-sdk
+        
+    - name: Prepare source files
+      run: |
+        # 创建一个简化的 Makefile
+        cat > Makefile.cross << 'EOF'
+        CC = aarch64-linux-gnu-gcc
+        CXX = aarch64-linux-gnu-g++
+        CXXFLAGS = -O2 -std=c++11 -DLINUX -DNDEBUG -Wall -Wno-unused-function
+        LDFLAGS = -static-libgcc -static-libstdc++
+        
+        SOURCES = $(wildcard *.cpp) $(wildcard lib/*.cpp)
+        OBJECTS = $(SOURCES:.cpp=.o)
+        TARGET = udp2raw_linux_arm64
+        
+        all: $(TARGET)
+        
+        $(TARGET): $(OBJECTS)
+        	$(CXX) $(LDFLAGS) -o $@ $^ -lpcap
+        
+        %.o: %.cpp
+        	$(CXX) $(CXXFLAGS) -c $< -o $@
+        
+        clean:
+        	rm -f $(OBJECTS) $(TARGET)
+        
+        .PHONY: all clean
+        EOF
     
-    - name: Create build directories
-      shell: powershell
+    - name: Build with cross-compiler
       run: |
-        New-Item -ItemType Directory -Force -Path "build"
-    
-    - name: Manual compilation with CMD
-      shell: cmd
-      run: |
-        echo Setting up Visual Studio environment...
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64_arm64
-        
-        echo Checking environment...
-        where cl.exe
-        where link.exe
-        
-        echo Creating object files...
-        if not exist build mkdir build
-        
-        echo Compiling main.cpp...
-        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
-               /I"C:\npcap-sdk\Include" ^
-               /c main.cpp /Fo"build\main.obj"
-        if errorlevel 1 goto :error
-        
-        echo Compiling common.cpp...
-        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
-               /I"C:\npcap-sdk\Include" ^
-               /c common.cpp /Fo"build\common.obj"
-        if errorlevel 1 goto :error
-        
-        echo Compiling log.cpp...
-        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
-               /I"C:\npcap-sdk\Include" ^
-               /c log.cpp /Fo"build\log.obj"
-        if errorlevel 1 goto :error
-        
-        echo Compiling network.cpp...
-        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
-               /I"C:\npcap-sdk\Include" ^
-               /c network.cpp /Fo"build\network.obj"
-        if errorlevel 1 goto :error
-        
-        echo Compiling misc.cpp...
-        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
-               /I"C:\npcap-sdk\Include" ^
-               /c misc.cpp /Fo"build\misc.obj"
-        if errorlevel 1 goto :error
-        
-        echo Compiling fd_manager.cpp...
-        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
-               /I"C:\npcap-sdk\Include" ^
-               /c fd_manager.cpp /Fo"build\fd_manager.obj"
-        if errorlevel 1 goto :error
-        
-        echo Compiling client.cpp...
-        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
-               /I"C:\npcap-sdk\Include" ^
-               /c client.cpp /Fo"build\client.obj"
-        if errorlevel 1 goto :error
-        
-        echo Compiling server.cpp...
-        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
-               /I"C:\npcap-sdk\Include" ^
-               /c server.cpp /Fo"build\server.obj"
-        if errorlevel 1 goto :error
-        
-        echo Compiling my_ev.cpp...
-        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
-               /I"C:\npcap-sdk\Include" ^
-               /c my_ev.cpp /Fo"build\my_ev.obj"
-        if errorlevel 1 goto :error
-        
-        echo Compiling packet.cpp...
-        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
-               /I"C:\npcap-sdk\Include" ^
-               /c packet.cpp /Fo"build\packet.obj"
-        if errorlevel 1 goto :error
-        
-        echo Compiling encrypt.cpp...
-        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
-               /I"C:\npcap-sdk\Include" ^
-               /c encrypt.cpp /Fo"build\encrypt.obj"
-        if errorlevel 1 goto :error
-        
-        echo Compiling connection.cpp...
-        cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
-               /I"C:\npcap-sdk\Include" ^
-               /c connection.cpp /Fo"build\connection.obj"
-        if errorlevel 1 goto :error
-        
-        echo Compiling lib files...
-        if exist "lib\aes.cpp" (
-            cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
-                   /I"C:\npcap-sdk\Include" ^
-                   /c lib\aes.cpp /Fo"build\aes.obj"
-            if errorlevel 1 goto :error
-        )
-        
-        if exist "lib\des.cpp" (
-            cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
-                   /I"C:\npcap-sdk\Include" ^
-                   /c lib\des.cpp /Fo"build\des.obj"
-            if errorlevel 1 goto :error
-        )
-        
-        if exist "lib\md5.cpp" (
-            cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
-                   /I"C:\npcap-sdk\Include" ^
-                   /c lib\md5.cpp /Fo"build\md5.obj"
-            if errorlevel 1 goto :error
-        )
-        
-        if exist "lib\pbkdf2-sha1.cpp" (
-            cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
-                   /I"C:\npcap-sdk\Include" ^
-                   /c lib\pbkdf2-sha1.cpp /Fo"build\pbkdf2-sha1.obj"
-            if errorlevel 1 goto :error
-        )
-        
-        if exist "lib\pbkdf2-sha256.cpp" (
-            cl.exe /nologo /O2 /MT /EHsc /W3 /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
-                   /I"C:\npcap-sdk\Include" ^
-                   /c lib\pbkdf2-sha256.cpp /Fo"build\pbkdf2-sha256.obj"
-            if errorlevel 1 goto :error
-        )
-        
-        echo Linking executable...
-        link.exe /NOLOGO /SUBSYSTEM:CONSOLE ^
-                 /LIBPATH:"C:\npcap-sdk\Lib\ARM64" ^
-                 /OUT:"udp2raw_arm64.exe" ^
-                 build\*.obj ^
-                 wpcap.lib ws2_32.lib iphlpapi.lib kernel32.lib user32.lib
-        if errorlevel 1 goto :error
-        
-        echo Build successful!
-        goto :end
-        
-        :error
-        echo Build failed!
-        exit /b 1
-        
-        :end
+        make -f Makefile.cross
     
     - name: Verify executable
-      shell: powershell
       run: |
-        if (Test-Path "udp2raw_arm64.exe") {
-            $fileInfo = Get-Item "udp2raw_arm64.exe"
-            Write-Host "Success! Executable created:"
-            Write-Host "File: $($fileInfo.Name)"
-            Write-Host "Size: $($fileInfo.Length) bytes"
-            Write-Host "Created: $($fileInfo.CreationTime)"
-        } else {
-            Write-Host "ERROR: Executable not found!"
-            Write-Host "Build directory contents:"
-            Get-ChildItem "build" -ErrorAction SilentlyContinue
+        if [ -f "udp2raw_linux_arm64" ]; then
+            echo "Build successful!"
+            ls -la udp2raw_linux_arm64
+            file udp2raw_linux_arm64
+        else
+            echo "Build failed!"
             exit 1
-        }
+        fi
     
     - name: Upload executable
       uses: actions/upload-artifact@v4
       with:
-        name: udp2raw-windows-arm64
-        path: udp2raw_arm64.exe
+        name: udp2raw-linux-arm64
+        path: udp2raw_linux_arm64
         retention-days: 30
