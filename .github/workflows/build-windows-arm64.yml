@@ -35,9 +35,12 @@ jobs:
         mkdir build && cd build
         
         # 运行 CMake 配置项目
-        # 核心修改：移除了 -G "MinGW Makefiles" 参数。
-        # CMake 会自动选择当前环境可用的生成器（如 "Unix Makefiles"）。
-        cmake .. -DENABLE_SERVER=ON -DENABLE_CLIENT=OFF
+        # 核心修改：使用 CMAKE_C_FLAGS 和 CMAKE_CXX_FLAGS 添加了 -D_WIN32 宏定义。
+        # 这个宏会告诉预处理器当前是 Windows 环境，从而避免包含 <linux/filter.h>。
+        # 同时，根据项目实际情况，我们使用 -DDISABLE_CLIENT=1 来禁用客户端。
+        cmake .. -DCMAKE_C_FLAGS="-D_WIN32" \
+                 -DCMAKE_CXX_FLAGS="-D_WIN32" \
+                 -DDISABLE_CLIENT=1
                  
         # 执行编译
         make
