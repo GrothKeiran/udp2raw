@@ -16,13 +16,12 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # 步骤 2：安装正确的交叉编译工具链
+    # 步骤 2：安装交叉编译工具链
     - name: Setup MSYS2 cross-compilation environment
       uses: msys2/setup-msys2@v2
       with:
         msystem: MINGW64
         update: true
-        # 移除了所有行内注释，以避免被当作包名传递给 pacman
         install: >-
           make
           cmake
@@ -38,14 +37,19 @@ jobs:
         mkdir build && cd build
         
         # 运行 CMake 配置交叉编译项目
-        cmake .. -DCMAKE_SYSTEM_NAME=Windows \
+        # -DCMAKE_LINKER=lld：这是最关键的修改，强制 CMake 使用 lld 链接器。
+        # -DDISABLE_PCAP=ON：禁用 pcap 依赖，避免交叉编译时出现库找不到的问题。
+        cmake .. -G "Unix Makefiles" \
+                 -DCMAKE_SYSTEM_NAME=Windows \
                  -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
                  -DCMAKE_C_COMPILER=clang \
                  -DCMAKE_CXX_COMPILER=clang++ \
+                 -DCMAKE_LINKER=lld \
                  -DCMAKE_C_FLAGS="--target=aarch64-w64-mingw32" \
                  -DCMAKE_CXX_FLAGS="--target=aarch64-w64-mingw32" \
                  -DENABLE_SERVER=ON \
-                 -DENABLE_CLIENT=OFF
+                 -DENABLE_CLIENT=OFF \
+                 -DDISABLE_PCAP=ON
                  
         # 执行编译
         make
