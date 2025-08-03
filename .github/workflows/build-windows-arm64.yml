@@ -1,7 +1,9 @@
-# .github/workflows/build-windows-arm64.yml
+# .github/workflows/build-windows-x64.yml
 
-name: Build udp2raw for Windows ARM64 (Server Mode)
+# 工作流程名称
+name: Build udp2raw for Windows x64 (Server Mode)
 
+# 触发条件：手动触发或推送到主分支
 on:
   workflow_dispatch:
   push:
@@ -9,56 +11,51 @@ on:
 
 jobs:
   build:
+    # 使用标准的 Windows 虚拟机环境
     runs-on: windows-latest
 
     steps:
-    # 步骤 1：检出代码
+    # 步骤 1：检出您的代码
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # 步骤 2：安装交叉编译工具链
-    - name: Setup MSYS2 cross-compilation environment
+    # 步骤 2：设置 MSYS2 环境
+    # 这是在 Windows 上进行编译的标准环境
+    - name: Setup MSYS2
       uses: msys2/setup-msys2@v2
       with:
-        msystem: MINGW64
+        msystem: MINGW64 # 使用标准的 64 位环境
         update: true
         install: >-
           make
           cmake
-          mingw-w64-x86_64-clang
-          mingw-w64-x86_64-lld
-          mingw-w64-x86_64-compiler-rt
+          mingw-w64-x86_64-toolchain
 
     # 步骤 3：编译 udp2raw
-    - name: Build udp2raw for ARM64
+    - name: Build udp2raw for x64
+      # 使用 MINGW64 shell
       shell: msys2 {0}
       run: |
         # 创建构建目录
         mkdir build && cd build
         
-        # 运行 CMake 配置交叉编译项目
-        # -DCMAKE_LINKER=lld：这是最关键的修改，强制 CMake 使用 lld 链接器。
-        # -DDISABLE_PCAP=ON：禁用 pcap 依赖，避免交叉编译时出现库找不到的问题。
-        cmake .. -G "Unix Makefiles" \
-                 -DCMAKE_SYSTEM_NAME=Windows \
-                 -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-                 -DCMAKE_C_COMPILER=clang \
-                 -DCMAKE_CXX_COMPILER=clang++ \
-                 -DCMAKE_LINKER=lld \
-                 -DCMAKE_C_FLAGS="--target=aarch64-w64-mingw32" \
-                 -DCMAKE_CXX_FLAGS="--target=aarch64-w64-mingw32" \
-                 -DENABLE_SERVER=ON \
-                 -DENABLE_CLIENT=OFF \
-                 -DDISABLE_PCAP=ON
+        # 运行 CMake 配置项目
+        # -DENABLE_SERVER=ON: 明确启用服务器模式
+        # -DENABLE_CLIENT=OFF: 禁用客户端模式，确保只编译服务器功能
+        # -G "MinGW Makefiles": 在 MINGW64 环境下，这是最合适的生成器
+        cmake .. -G "MinGW Makefiles" -DENABLE_SERVER=ON -DENABLE_CLIENT=OFF
                  
         # 执行编译
         make
 
-    # 步骤 4：上传编译产物
+    # 步骤 4：上传编译好的可执行文件
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: udp2raw-windows-arm64-server
+        # 构建产物的名称
+        name: udp2raw-windows-x64-server
+        # 要上传的文件路径
         path: build/udp2raw.exe
+        # 如果找不到文件则报错，确保我们拿到了编译产物
         if-no-files-found: error
 
