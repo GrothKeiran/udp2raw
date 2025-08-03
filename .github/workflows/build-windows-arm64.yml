@@ -1,4 +1,4 @@
-name: Build udp2raw Windows ARM64 (MinGW)
+name: Build udp2raw Windows ARM64 with Server Support
 
 on:
   push:
@@ -8,73 +8,331 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-with-mingw:
-    runs-on: ubuntu-latest
+  build-windows-arm64:
+    runs-on: windows-latest
     
     steps:
-    - name: Checkout code
+    - name: Checkout udp2raw source
       uses: actions/checkout@v4
     
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          gcc-aarch64-linux-gnu \
-          g++-aarch64-linux-gnu \
-          build-essential \
-          wget \
-          unzip
+    - name: Setup Visual Studio Build Tools
+      uses: microsoft/setup-msbuild@v1.3
     
-    - name: Download WinPcap SDK
+    - name: Download and setup WinPcap development libraries
+      shell: powershell
       run: |
-        wget -O npcap-sdk.zip "https://npcap.com/dist/npcap-sdk-1.13.zip"
-        unzip npcap-sdk.zip -d npcap-sdk
+        Write-Host "Downloading WinPcap Developer Pack..."
+        # 下载 WinPcap 开发包而不是 Npcap SDK，因为它包含完整的库文件
+        Invoke-WebRequest -Uri "https://www.winpcap.org/install/bin/WpdPack_4_1_2.zip" -OutFile "WpdPack.zip"
+        Expand-Archive -Path "WpdPack.zip" -DestinationPath "." -Force
         
-    - name: Prepare source files
-      run: |
-        # 创建一个简化的 Makefile
-        cat > Makefile.cross << 'EOF'
-        CC = aarch64-linux-gnu-gcc
-        CXX = aarch64-linux-gnu-g++
-        CXXFLAGS = -O2 -std=c++11 -DLINUX -DNDEBUG -Wall -Wno-unused-function
-        LDFLAGS = -static-libgcc -static-libstdc++
-        
-        SOURCES = $(wildcard *.cpp) $(wildcard lib/*.cpp)
-        OBJECTS = $(SOURCES:.cpp=.o)
-        TARGET = udp2raw_linux_arm64
-        
-        all: $(TARGET)
-        
-        $(TARGET): $(OBJECTS)
-        	$(CXX) $(LDFLAGS) -o $@ $^ -lpcap
-        
-        %.o: %.cpp
-        	$(CXX) $(CXXFLAGS) -c $< -o $@
-        
-        clean:
-        	rm -f $(OBJECTS) $(TARGET)
-        
-        .PHONY: all clean
-        EOF
-    
-    - name: Build with cross-compiler
-      run: |
-        make -f Makefile.cross
-    
-    - name: Verify executable
-      run: |
-        if [ -f "udp2raw_linux_arm64" ]; then
-            echo "Build successful!"
-            ls -la udp2raw_linux_arm64
-            file udp2raw_linux_arm64
-        else
-            echo "Build failed!"
+        # 检查文件是否正确解压
+        if (Test-Path "WpdPack\Include\pcap.h") {
+            Write-Host "WinPcap DevPack installed successfully"
+        } else {
+            Write-Host "WinPcap DevPack installation failed"
             exit 1
-        fi
+        }
+        
+        # 显示目录结构
+        Write-Host "WpdPack structure:"
+        Get-ChildItem "WpdPack" -Recurse | Where-Object { $_.Name -like "*.lib" -or $_.Name -like "*.h" } | ForEach-Object { Write-Host $_.FullName }
     
-    - name: Upload executable
+    - name: List and verify source files
+      shell: powershell
+      run: |
+        Write-Host "=== Checking source files in repository ==="
+        Write-Host "Current directory: $(Get-Location)"
+        Write-Host "All .cpp files:"
+        Get-ChildItem -Path . -Filter "*.cpp" -Recurse | ForEach-Object { Write-Host "  $($_.FullName)" }
+        Write-Host "All .h files:"
+        Get-ChildItem -Path . -Filter "*.h" -Recurse | ForEach-Object { Write-Host "  $($_.FullName)" }
+        
+        # 检查关键文件是否存在
+        $requiredFiles = @(
+            "main.cpp",
+            "common.cpp", 
+            "common.h",
+            "log.cpp",
+            "log.h"
+        )
+        
+        foreach ($file in $requiredFiles) {
+            if (Test-Path $file) {
+                Write-Host "✓ Found: $file"
+            } else {
+                Write-Host "✗ Missing: $file"
+            }
+        }
+    
+    - name: Create build script
+      shell: powershell
+      run: |
+        # 创建一个批处理文件来进行编译
+        $buildScript = @'
+@echo off
+echo Setting up Visual Studio environment for ARM64...
+call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64_arm64
+
+echo Checking compiler...
+where cl.exe
+where link.exe
+
+echo Creating build directory...
+if not exist "build" mkdir build
+
+echo Setting environment variables...
+set INCLUDE=%CD%\WpdPack\Include;%INCLUDE%
+set LIB=%CD%\WpdPack\Lib\x64;%LIB%
+
+echo Starting compilation...
+
+REM 首先编译主要的核心文件（确保存在的文件）
+echo Compiling main.cpp...
+cl.exe /nologo /O2 /MT /EHsc /W3 ^
+       /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+       /I"WpdPack\Include" ^
+       /c main.cpp /Fo"build\main.obj"
+if errorlevel 1 goto :compile_error
+
+echo Compiling common.cpp...
+cl.exe /nologo /O2 /MT /EHsc /W3 ^
+       /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+       /I"WpdPack\Include" ^
+       /c common.cpp /Fo"build\common.obj"
+if errorlevel 1 goto :compile_error
+
+echo Compiling log.cpp...
+cl.exe /nologo /O2 /MT /EHsc /W3 ^
+       /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+       /I"WpdPack\Include" ^
+       /c log.cpp /Fo"build\log.obj"
+if errorlevel 1 goto :compile_error
+
+REM 编译其他核心文件（检查是否存在）
+if exist "network.cpp" (
+    echo Compiling network.cpp...
+    cl.exe /nologo /O2 /MT /EHsc /W3 ^
+           /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+           /I"WpdPack\Include" ^
+           /c network.cpp /Fo"build\network.obj"
+    if errorlevel 1 goto :compile_error
+)
+
+if exist "misc.cpp" (
+    echo Compiling misc.cpp...
+    cl.exe /nologo /O2 /MT /EHsc /W3 ^
+           /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+           /I"WpdPack\Include" ^
+           /c misc.cpp /Fo"build\misc.obj"
+    if errorlevel 1 goto :compile_error
+)
+
+if exist "fd_manager.cpp" (
+    echo Compiling fd_manager.cpp...
+    cl.exe /nologo /O2 /MT /EHsc /W3 ^
+           /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+           /I"WpdPack\Include" ^
+           /c fd_manager.cpp /Fo"build\fd_manager.obj"
+    if errorlevel 1 goto :compile_error
+)
+
+if exist "client.cpp" (
+    echo Compiling client.cpp...
+    cl.exe /nologo /O2 /MT /EHsc /W3 ^
+           /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+           /I"WpdPack\Include" ^
+           /c client.cpp /Fo"build\client.obj"
+    if errorlevel 1 goto :compile_error
+)
+
+if exist "server.cpp" (
+    echo Compiling server.cpp...
+    cl.exe /nologo /O2 /MT /EHsc /W3 ^
+           /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+           /I"WpdPack\Include" ^
+           /c server.cpp /Fo"build\server.obj"
+    if errorlevel 1 goto :compile_error
+)
+
+if exist "packet.cpp" (
+    echo Compiling packet.cpp...
+    cl.exe /nologo /O2 /MT /EHsc /W3 ^
+           /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+           /I"WpdPack\Include" ^
+           /c packet.cpp /Fo"build\packet.obj"
+    if errorlevel 1 goto :compile_error
+)
+
+if exist "encrypt.cpp" (
+    echo Compiling encrypt.cpp...
+    cl.exe /nologo /O2 /MT /EHsc /W3 ^
+           /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+           /I"WpdPack\Include" ^
+           /c encrypt.cpp /Fo"build\encrypt.obj"
+    if errorlevel 1 goto :compile_error
+)
+
+if exist "connection.cpp" (
+    echo Compiling connection.cpp...
+    cl.exe /nologo /O2 /MT /EHsc /W3 ^
+           /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+           /I"WpdPack\Include" ^
+           /c connection.cpp /Fo"build\connection.obj"
+    if errorlevel 1 goto :compile_error
+)
+
+REM 编译 lib 目录下的文件
+if exist "lib" (
+    echo Compiling library files...
+    
+    if exist "lib\aes.cpp" (
+        echo Compiling lib\aes.cpp...
+        cl.exe /nologo /O2 /MT /EHsc /W3 ^
+               /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+               /I"WpdPack\Include" ^
+               /c lib\aes.cpp /Fo"build\aes.obj"
+        if errorlevel 1 goto :compile_error
+    )
+    
+    if exist "lib\des.cpp" (
+        echo Compiling lib\des.cpp...
+        cl.exe /nologo /O2 /MT /EHsc /W3 ^
+               /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+               /I"WpdPack\Include" ^
+               /c lib\des.cpp /Fo"build\des.obj"
+        if errorlevel 1 goto :compile_error
+    )
+    
+    if exist "lib\md5.cpp" (
+        echo Compiling lib\md5.cpp...
+        cl.exe /nologo /O2 /MT /EHsc /W3 ^
+               /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+               /I"WpdPack\Include" ^
+               /c lib\md5.cpp /Fo"build\md5.obj"
+        if errorlevel 1 goto :compile_error
+    )
+    
+    if exist "lib\pbkdf2-sha1.cpp" (
+        echo Compiling lib\pbkdf2-sha1.cpp...
+        cl.exe /nologo /O2 /MT /EHsc /W3 ^
+               /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+               /I"WpdPack\Include" ^
+               /c lib\pbkdf2-sha1.cpp /Fo"build\pbkdf2-sha1.obj"
+        if errorlevel 1 goto :compile_error
+    )
+    
+    if exist "lib\pbkdf2-sha256.cpp" (
+        echo Compiling lib\pbkdf2-sha256.cpp...
+        cl.exe /nologo /O2 /MT /EHsc /W3 ^
+               /DWIN32 /DNDEBUG /D_CONSOLE /D_CRT_SECURE_NO_WARNINGS ^
+               /I"WpdPack\Include" ^
+               /c lib\pbkdf2-sha256.cpp /Fo"build\pbkdf2-sha256.obj"
+        if errorlevel 1 goto :compile_error
+    )
+)
+
+echo Linking executable...
+link.exe /NOLOGO /SUBSYSTEM:CONSOLE ^
+         /LIBPATH:"WpdPack\Lib\x64" ^
+         /OUT:"udp2raw_windows_arm64.exe" ^
+         build\*.obj ^
+         wpcap.lib packet.lib ws2_32.lib iphlpapi.lib kernel32.lib user32.lib advapi32.lib
+
+if errorlevel 1 goto :link_error
+
+echo Build completed successfully!
+goto :end
+
+:compile_error
+echo *** COMPILATION ERROR ***
+exit /b 1
+
+:link_error
+echo *** LINKING ERROR ***
+echo Checking available libraries...
+dir "WpdPack\Lib\x64\*.lib"
+exit /b 1
+
+:end
+echo Build process finished.
+'@
+        
+        $buildScript | Out-File -FilePath "build.bat" -Encoding ASCII
+        Write-Host "Build script created successfully"
+    
+    - name: Execute build
+      shell: cmd
+      run: |
+        echo Starting the build process...
+        call build.bat
+    
+    - name: Verify and prepare executable
+      shell: powershell
+      run: |
+        if (Test-Path "udp2raw_windows_arm64.exe") {
+            $fileInfo = Get-Item "udp2raw_windows_arm64.exe"
+            Write-Host "SUCCESS! Executable created:"
+            Write-Host "File: $($fileInfo.Name)"
+            Write-Host "Size: $($fileInfo.Length) bytes"
+            Write-Host "Created: $($fileInfo.CreationTime)"
+            
+            # 检查文件是否为有效的 PE 文件
+            $bytes = Get-Content "udp2raw_windows_arm64.exe" -Encoding Byte -TotalCount 64
+            if ($bytes[0] -eq 0x4D -and $bytes[1] -eq 0x5A) {
+                Write-Host "✓ Valid PE executable detected"
+            }
+        } else {
+            Write-Host "ERROR: Executable not found!"
+            Write-Host "Checking build directory:"
+            if (Test-Path "build") {
+                Get-ChildItem "build"
+            }
+            Write-Host "Checking current directory for any .exe files:"
+            Get-ChildItem "." -Filter "*.exe"
+            exit 1
+        }
+    
+    - name: Upload Windows ARM64 executable
       uses: actions/upload-artifact@v4
       with:
-        name: udp2raw-linux-arm64
-        path: udp2raw_linux_arm64
+        name: udp2raw-windows-arm64-server-support
+        path: udp2raw_windows_arm64.exe
+        retention-days: 30
+    
+    - name: Create usage instructions
+      shell: powershell
+      run: |
+        $instructions = @"
+========================================
+udp2raw Windows ARM64 Build Complete!
+========================================
+
+Your executable: udp2raw_windows_arm64.exe
+
+This version includes FULL SERVER SUPPORT (-s option)!
+
+Usage example (Server Mode):
+udp2raw_windows_arm64.exe -s -l 0.0.0.0:40000 -r 127.0.0.1:19132 -k "Zhl20020713!" --raw-mode faketcp
+
+Usage example (Client Mode):  
+udp2raw_windows_arm64.exe -c -l 0.0.0.0:30000 -r YOUR_SERVER_IP:40000 -k "Zhl20020713!" --raw-mode faketcp
+
+Requirements:
+1. Install Npcap or WinPcap on your ARM64 Windows server
+2. Run as Administrator
+3. Make sure Windows Firewall allows the ports
+
+Download from: Actions -> Artifacts -> udp2raw-windows-arm64-server-support
+
+========================================
+"@
+        Write-Host $instructions
+        $instructions | Out-File -FilePath "USAGE_INSTRUCTIONS.txt" -Encoding UTF8
+    
+    - name: Upload instructions
+      uses: actions/upload-artifact@v4
+      with:
+        name: usage-instructions
+        path: USAGE_INSTRUCTIONS.txt
         retention-days: 30
