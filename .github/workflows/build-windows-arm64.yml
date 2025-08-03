@@ -27,7 +27,17 @@ jobs:
           cmake
           mingw-w64-x86_64-toolchain
 
-    # 步骤 3：编译 udp2raw
+    # 步骤 3：在编译前修补源代码
+    # 这是解决问题的关键步骤
+    - name: Patch source code for Windows build
+      shell: bash
+      run: |
+        # 使用 sed 命令直接在 common.h 文件中注释掉 #include <linux/filter.h> 这一行
+        # 这可以从根本上解决 "linux/filter.h: No such file or directory" 的错误
+        sed -i 's|#include <linux/filter.h>|//#include <linux/filter.h>|' common.h
+        echo "Patched common.h to disable linux-specific header."
+
+    # 步骤 4：编译 udp2raw
     - name: Build udp2raw for x64
       shell: msys2 {0}
       run: |
@@ -35,17 +45,14 @@ jobs:
         mkdir build && cd build
         
         # 运行 CMake 配置项目
-        # 核心修改：使用 CMAKE_C_FLAGS 和 CMAKE_CXX_FLAGS 添加了 -D_WIN32 宏定义。
-        # 这个宏会告诉预处理器当前是 Windows 环境，从而避免包含 <linux/filter.h>。
-        # 同时，根据项目实际情况，我们使用 -DDISABLE_CLIENT=1 来禁用客户端。
-        cmake .. -DCMAKE_C_FLAGS="-D_WIN32" \
-                 -DCMAKE_CXX_FLAGS="-D_WIN32" \
-                 -DDISABLE_CLIENT=1
+        # 我们不再需要传递复杂的宏定义，因为源代码已经被修复
+        # 根据项目的 CMakeLists.txt，通过 -DDISABLE_CLIENT=1 来构建仅服务器模式
+        cmake .. -DDISABLE_CLIENT=1
                  
         # 执行编译
         make
 
-    # 步骤 4：上传编译产物
+    # 步骤 5：上传编译产物
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
