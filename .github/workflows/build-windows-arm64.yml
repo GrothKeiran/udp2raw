@@ -1,137 +1,64 @@
-name: Build Windows ARM64
+# .github/workflows/build-windows-arm64.yml
+
+name: Build udp2raw for Windows ARM64 (Server Mode)
 
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
+  # 允许手动触发此工作流程
   workflow_dispatch:
+  # 也可以在推送到 main 分支时自动触发
+  push:
+    branches: [ "main", "master" ]
 
 jobs:
-  build-windows-arm64:
-    runs-on: ubuntu-latest
+  build:
+    # 使用 Windows 虚拟机环境
+    runs-on: windows-latest
     
     steps:
-    - name: Checkout code
+    # 第一步：检出您的代码
+    - name: Checkout repository
       uses: actions/checkout@v4
+
+    # 第二步：安装 MSYS2 环境
+    # MSYS2 提供了在 Windows 上进行交叉编译所需的工具链和库
+    - name: Setup MSYS2
+      uses: msys2/setup-msys2@v2
       with:
-        submodules: recursive
+        # 更新 MSYS2 包数据库
+        update: true
+        # 安装交叉编译工具链
+        install: >-
+          mingw-w64-clang-aarch64-toolchain
+          mingw-w64-clang-aarch64-cmake
+          mingw-w64-clang-aarch64-make
 
-    - name: Install dependencies
+    # 第三步：编译 udp2raw
+    # 使用 MSYS2 的 shell 环境来执行编译命令
+    - name: Build udp2raw for ARM64
+      shell: msys2 {0}
       run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential wget xz-utils
+        # 创建一个构建目录
+        mkdir build && cd build
+        
+        # 运行 CMake 来配置项目
+        # -DCMAKE_TOOLCHAIN_FILE: 指定交叉编译工具链文件
+        # -DENABLE_SERVER=ON: 明确启用服务器模式（这是默认选项，但显式指定更清晰）
+        # -DENABLE_CLIENT=OFF: 禁用客户端模式，以确保只编译服务器功能
+        cmake .. -G "MinGW Makefiles" \
+                 -DCMAKE_TOOLCHAIN_FILE=$MSYSYSTEM/share/clang-aarch64-cmake/toolchain.cmake \
+                 -DENABLE_SERVER=ON \
+                 -DENABLE_CLIENT=OFF
+                 
+        # 执行编译
+        make
 
-    - name: Download and setup LLVM-MinGW
-      run: |
-        # 下载预编译的LLVM-MinGW工具链
-        wget -q https://github.com/mstorsjo/llvm-mingw/releases/download/20231128/llvm-mingw-20231128-ucrt-ubuntu-20.04-x86_64.tar.xz
-        
-        # 解压
-        tar -xf llvm-mingw-20231128-ucrt-ubuntu-20.04-x86_64.tar.xz
-        
-        # 移动到固定位置
-        sudo mv llvm-mingw-20231128-ucrt-ubuntu-20.04-x86_64 /opt/llvm-mingw
-        
-        # 添加到PATH
-        echo "/opt/llvm-mingw/bin" >> $GITHUB_PATH
-        
-        # 验证安装
-        /opt/llvm-mingw/bin/aarch64-w64-mingw32-gcc --version
-
-    - name: Build udp2raw for Windows ARM64
-      run: |
-        # 设置编译器路径
-        export PATH="/opt/llvm-mingw/bin:$PATH"
-        export CC=aarch64-w64-mingw32-gcc
-        export CXX=aarch64-w64-mingw32-g++
-        
-        # 验证编译器
-        $CC --version
-        
-        # 生成版本信息
-        echo "const char * gitversion=\"$(git describe --tags --always --dirty)\";" > git_version.h
-        
-        # 检查项目结构
-        ls -la
-        find . -name "*.cpp" -type f | head -20
-        
-        # 使用项目的Makefile进行交叉编译
-        echo "尝试使用Makefile编译..."
-        if [ -f "makefile" ] || [ -f "Makefile" ]; then
-          # 使用项目的cross3目标（专门用于Windows交叉编译）
-          make clean || true
-          make cross3 CC=aarch64-w64-mingw32-gcc CXX=aarch64-w64-mingw32-g++ -j$(nproc)
-          
-          # 检查输出文件
-          ls -la | grep udp2raw || true
-          
-          if [ -f "udp2raw_cross3" ]; then
-            mv udp2raw_cross3 udp2raw_windows_arm64.exe
-            echo "✅ Makefile编译成功！"
-          elif [ -f "udp2raw_cross3.exe" ]; then
-            mv udp2raw_cross3.exe udp2raw_windows_arm64.exe
-            echo "✅ Makefile编译成功！"
-          elif [ -f "udp2raw" ]; then
-            mv udp2raw udp2raw_windows_arm64.exe
-            echo "✅ Makefile编译成功！"
-          else
-            echo "❌ Makefile编译失败，尝试手动编译..."
-            
-            # 手动编译（跳过有问题的文件）
-            $CXX -static -O2 -std=c++11 \
-              -DUDP2RAW_VERSION=\"$(git describe --tags --always)\" \
-              -DMINGW -D_WIN32_WINNT=0x0600 \
-              -I. \
-              main.cpp \
-              lib/md5.cpp \
-              lib/pbkdf2-sha1.cpp \
-              lib/pbkdf2-sha256.cpp \
-              encrypt.cpp \
-              log.cpp \
-              network.cpp \
-              connection.cpp \
-              misc.cpp \
-              fd_manager.cpp \
-              client.cpp \
-              server.cpp \
-              lib/aes_faster_c/aes.cpp \
-              lib/aes_faster_c/wrapper.cpp \
-              -o udp2raw_windows_arm64.exe \
-              -lws2_32 -lwinmm -static-libgcc -static-libstdc++ \
-              -Wl,--gc-sections -s || echo "手动编译也失败了"
-          fi
-        else
-          echo "❌ 没有找到Makefile"
-          exit 1
-        fi
-        
-        # 最终检查
-        if [ -f "udp2raw_windows_arm64.exe" ]; then
-          echo "✅ 编译成功！"
-          ls -lh udp2raw_windows_arm64.exe
-          file udp2raw_windows_arm64.exe
-        else
-          echo "❌ 编译失败"
-          exit 1
-        fi
-
-    - name: Create release info
-      run: |
-        echo "Build Date: $(date)" > release_info.txt
-        echo "Commit: $(git rev-parse HEAD)" >> release_info.txt
-        echo "Target: Windows ARM64" >> release_info.txt
-        if [ -f "udp2raw_windows_arm64.exe" ]; then
-          echo "File Size: $(stat -c%s udp2raw_windows_arm64.exe) bytes" >> release_info.txt
-          echo "SHA256: $(sha256sum udp2raw_windows_arm64.exe | cut -d' ' -f1)" >> release_info.txt
-        fi
-        cat release_info.txt
-
-    - name: Upload artifacts
+    # 第四步：上传编译好的可执行文件
+    # 将生成的 udp2raw_arm64.exe 文件作为构建产物上传
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: udp2raw-windows-arm64
-        path: |
-          udp2raw_windows_arm64.exe
-          release_info.txt
-        retention-days: 30
+        # 构建产物的名称
+        name: udp2raw-windows-arm64-server
+        # 要上传的文件路径
+        path: build/udp2raw_arm64.exe
+
