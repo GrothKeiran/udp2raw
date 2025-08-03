@@ -1,170 +1,124 @@
-name: Build udp2raw ARM64 (Docker Cross-Compile)
+name: Build Windows ARM64
 
 on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
-  cross-compile-arm64:
-    runs-on: ubuntu-latest
+  build-windows-arm64:
+    runs-on: windows-latest
     
     steps:
-    - name: Checkout source
+    - name: Checkout code
       uses: actions/checkout@v4
-    
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-    
-    - name: Create cross-compilation environment
+      with:
+        submodules: recursive
+
+    - name: Setup MSYS2
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: CLANG64
+        update: true
+        install: >-
+          mingw-w64-clang-aarch64-toolchain
+          mingw-w64-clang-aarch64-gcc
+          mingw-w64-clang-aarch64-gcc-libs
+          mingw-w64-clang-aarch64-make
+          mingw-w64-clang-aarch64-cmake
+          make
+          git
+
+    - name: Build udp2raw for Windows ARM64
+      shell: msys2 {0}
       run: |
-        cat > Dockerfile << 'EOF'
-        FROM --platform=linux/amd64 ubuntu:20.04
+        # 设置交叉编译环境变量
+        export CC=aarch64-w64-mingw32-gcc
+        export CXX=aarch64-w64-mingw32-g++
+        export AR=aarch64-w64-mingw32-ar
+        export STRIP=aarch64-w64-mingw32-strip
+        export RANLIB=aarch64-w64-mingw32-ranlib
         
-        # 安装交叉编译工具链
-        RUN apt-get update && apt-get install -y \
-            gcc-aarch64-linux-gnu \
-            g++-aarch64-linux-gnu \
-            build-essential \
-            make \
-            && rm -rf /var/lib/apt/lists/*
+        # 添加编译标志
+        export CFLAGS="-static -O2"
+        export CXXFLAGS="-static -O2"
+        export LDFLAGS="-static -static-libgcc -static-libstdc++"
         
-        WORKDIR /src
-        COPY . .
+        # 编译
+        make cross3 -j$(nproc)
         
-        # 创建简化的 Makefile 用于交叉编译
-        RUN cat > Makefile.cross << 'MAKEFILE_EOF'
-        CC = aarch64-linux-gnu-gcc
-        CXX = aarch64-linux-gnu-g++
-        
-        CXXFLAGS = -O2 -std=c++11 -DLINUX -DNDEBUG -Wall -Wno-unused-function -static
-        LDFLAGS = -static
-        
-        # 获取所有 .cpp 文件
-        MAIN_SOURCES = $(wildcard *.cpp)
-        LIB_SOURCES = $(wildcard lib/*.cpp)
-        ALL_SOURCES = $(MAIN_SOURCES) $(LIB_SOURCES)
-        
-        OBJECTS = $(ALL_SOURCES:.cpp=.o)
-        TARGET = udp2raw_linux_arm64_static
-        
-        all: $(TARGET)
-        
-        $(TARGET): $(OBJECTS)
-        	$(CXX) $(LDFLAGS) -o $@ $^
-        
-        %.o: %.cpp
-        	$(CXX) $(CXXFLAGS) -c $< -o $@
-        
-        clean:
-        	rm -f $(OBJECTS) $(TARGET)
-        
-        list-sources:
-        	@echo "Main sources: $(MAIN_SOURCES)"
-        	@echo "Lib sources: $(LIB_SOURCES)"
-        	@echo "All sources: $(ALL_SOURCES)"
-        
-        .PHONY: all clean list-sources
-        MAKEFILE_EOF
-        
-        # 显示源文件
-        make -f Makefile.cross list-sources
-        
-        # 开始编译
-        make -f Makefile.cross
-        
-        # 检查结果
-        if [ -f "udp2raw_linux_arm64_static" ]; then
-            echo "Build successful!"
-            ls -la udp2raw_linux_arm64_static
-            file udp2raw_linux_arm64_static
-        else
-            echo "Build failed!"
-            exit 1
+        # 重命名输出文件
+        if [ -f "udp2raw_cross3" ]; then
+          mv udp2raw_cross3 udp2raw_windows_arm64.exe
+        elif [ -f "udp2raw" ]; then
+          mv udp2raw udp2raw_windows_arm64.exe
         fi
-        EOF
-    
-    - name: Build with Docker
-      run: |
-        docker build -t udp2raw-builder .
         
-        # 创建容器并复制结果
-        docker create --name temp-container udp2raw-builder
-        docker cp temp-container:/src/udp2raw_linux_arm64_static ./
-        docker rm temp-container
-    
-    - name: Verify executable
-      run: |
-        if [ -f "udp2raw_linux_arm64_static" ]; then
-            echo "Cross-compilation successful!"
-            ls -la udp2raw_linux_arm64_static
-            file udp2raw_linux_arm64_static
-            
-            # 重命名为更清晰的名称
-            mv udp2raw_linux_arm64_static udp2raw_arm64_server_support
-        else
-            echo "Cross-compilation failed!"
-            exit 1
+        # 验证文件是否生成
+        ls -la *.exe || echo "No exe files found"
+        
+        # 显示文件信息
+        if [ -f "udp2raw_windows_arm64.exe" ]; then
+          file udp2raw_windows_arm64.exe
+          ls -lh udp2raw_windows_arm64.exe
         fi
-    
-    - name: Upload ARM64 executable
+
+    - name: Alternative build method (if main build fails)
+      shell: msys2 {0}
+      if: failure()
+      run: |
+        echo "Trying alternative build method..."
+        
+        # 清理之前的构建
+        make clean || true
+        
+        # 尝试直接使用 g++ 编译
+        aarch64-w64-mingw32-g++ -static -O2 -std=c++11 \
+          -DUDP2RAW_VERSION=\"$(git describe --tags --always)\" \
+          -I. \
+          *.cpp \
+          -o udp2raw_windows_arm64.exe \
+          -lws2_32 -lwinmm -static-libgcc -static-libstdc++
+        
+        # 验证文件
+        if [ -f "udp2raw_windows_arm64.exe" ]; then
+          echo "Alternative build successful!"
+          file udp2raw_windows_arm64.exe
+          ls -lh udp2raw_windows_arm64.exe
+        else
+          echo "Alternative build also failed"
+          exit 1
+        fi
+
+    - name: Create release info
+      shell: msys2 {0}
+      run: |
+        echo "Build Date: $(date)" > release_info.txt
+        echo "Commit: $(git rev-parse HEAD)" >> release_info.txt
+        echo "Branch: $(git branch --show-current)" >> release_info.txt
+        if [ -f "udp2raw_windows_arm64.exe" ]; then
+          echo "File Size: $(stat -c%s udp2raw_windows_arm64.exe) bytes" >> release_info.txt
+        fi
+
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: udp2raw-arm64-linux-static
-        path: udp2raw_arm64_server_support
+        name: udp2raw-windows-arm64
+        path: |
+          udp2raw_windows_arm64.exe
+          release_info.txt
         retention-days: 30
-    
-    - name: Create usage guide
-      run: |
-        cat > ARM64_USAGE_GUIDE.md << 'EOF'
-        # udp2raw ARM64 Linux Executable
-        
-        ## What you got
-        - A statically linked ARM64 Linux executable
-        - **FULL SERVER SUPPORT** (unlike the official Windows multi-platform version)
-        - Can run on ARM64 Linux systems, including WSL2 if available
-        
-        ## How to use on Windows ARM64
-        
-        ### Option 1: WSL2 (if supported on your ARM64 Windows)
-        1. Install WSL2 with Ubuntu
-        2. Copy the executable to WSL2
-        3. Run: `chmod +x udp2raw_arm64_server_support`
-        4. Run: `sudo ./udp2raw_arm64_server_support -s -l 0.0.0.0:40000 -r 127.0.0.1:19132 -k "Zhl20020713!" --raw-mode faketcp`
-        
-        ### Option 2: Linux VM
-        1. Install an ARM64 Linux VM (Ubuntu, Debian, etc.)
-        2. Copy the executable to the VM
-        3. Run with same commands as above
-        
-        ### Option 3: Native ARM64 Linux Server
-        If you have access to an ARM64 Linux server, this will run natively.
-        
-        ## Server Mode Usage
-        ```bash
-        # Make executable
-        chmod +x udp2raw_arm64_server_support
-        
-        # Run server mode (what you need for MC server)
-        sudo ./udp2raw_arm64_server_support -s -l 0.0.0.0:40000 -r 127.0.0.1:19132 -k "Zhl20020713!" --raw-mode faketcp
-        ```
-        
-        ## Client Mode Usage
-        ```bash
-        # Run client mode
-        sudo ./udp2raw_arm64_server_support -c -l 0.0.0.0:30000 -r YOUR_SERVER_IP:40000 -k "Zhl20020713!" --raw-mode faketcp
-        ```
-        
-        ## Why this works
-        - This is compiled from the original udp2raw source (not the limited multi-platform version)
-        - Includes full server mode support
-        - Statically linked, so no dependencies needed
-        
-        EOF
-        
-        echo "Usage guide created!"
-    
-    - name: Upload usage guide
-      uses: actions/upload-artifact@v4
+
+    - name: Create Release (on tag)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
       with:
-        name: arm64-usage-guide
-        path: ARM64_USAGE_GUIDE.md
-        retention-days: 30
+        files: |
+          udp2raw_windows_arm64.exe
+          release_info.txt
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
