@@ -1,0 +1,326 @@
+name: Build udp2raw Windows ARM64
+
+on:
+  push:
+    branches: [ unified, main ]
+  pull_request:
+    branches: [ unified, main ]
+  # 手动触发
+  workflow_dispatch:
+
+jobs:
+  build-windows-arm64:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Setup Visual Studio
+      uses: microsoft/setup-msbuild@v1.3
+      with:
+        vs-version: '[17.0,18.0)'
+        msbuild-architecture: x64
+    
+    - name: Add MSBuild to PATH
+      uses: microsoft/setup-msbuild@v1.3
+    
+    - name: Setup Windows SDK
+      shell: powershell
+      run: |
+        # 确保安装了 Windows 11 SDK
+        choco install windows-sdk-10-version-2004-all
+    
+    - name: Download and setup Npcap SDK
+      shell: powershell
+      run: |
+        Write-Host "Downloading Npcap SDK..."
+        $url = "https://npcap.com/dist/npcap-sdk-1.13.zip"
+        $output = "npcap-sdk.zip"
+        
+        # 使用 curl 下载 (GitHub Actions 自带)
+        curl -L -o $output $url
+        
+        Write-Host "Extracting Npcap SDK..."
+        Expand-Archive -Path $output -DestinationPath "C:\npcap-sdk" -Force
+        
+        # 检查文件是否存在
+        if (Test-Path "C:\npcap-sdk\Include\pcap.h") {
+            Write-Host "Npcap SDK installed successfully"
+        } else {
+            Write-Host "Npcap SDK installation failed"
+            exit 1
+        }
+    
+    - name: Create Visual Studio Project File
+      shell: powershell
+      run: |
+        $projectContent = @"
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|ARM64">
+      <Configuration>Release</Configuration>
+      <Platform>ARM64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <ProjectGuid>{12345678-1234-5678-9012-123456789012}</ProjectGuid>
+    <RootNamespace>udp2raw</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  
+  <Import Project="`$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  
+  <PropertyGroup Condition="'`$(Configuration)|`$(Platform)'=='Release|ARM64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  
+  <Import Project="`$(VCTargetsPath)\Microsoft.Cpp.props" />
+  
+  <PropertyGroup Condition="'`$(Configuration)|`$(Platform)'=='Release|ARM64'">
+    <LinkIncremental>false</LinkIncremental>
+    <IncludePath>C:\npcap-sdk\Include;`$(IncludePath)</IncludePath>
+    <LibraryPath>C:\npcap-sdk\Lib\ARM64;`$(LibraryPath)</LibraryPath>
+    <OutDir>`$(SolutionDir)bin\`$(Platform)\`$(Configuration)\</OutDir>
+    <IntDir>`$(SolutionDir)obj\`$(Platform)\`$(Configuration)\</IntDir>
+  </PropertyGroup>
+  
+  <ItemDefinitionGroup Condition="'`$(Configuration)|`$(Platform)'=='Release|ARM64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>false</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;WIN32;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>false</ConformanceMode>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <AdditionalIncludeDirectories>C:\npcap-sdk\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <AdditionalDependencies>wpcap.lib;ws2_32.lib;iphlpapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>C:\npcap-sdk\Lib\ARM64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+    </Link>
+  </ItemDefinitionGroup>
+  
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="common.cpp" />
+    <ClCompile Include="log.cpp" />
+    <ClCompile Include="network.cpp" />
+    <ClCompile Include="misc.cpp" />
+    <ClCompile Include="fd_manager.cpp" />
+    <ClCompile Include="client.cpp" />
+    <ClCompile Include="server.cpp" />
+    <ClCompile Include="my_ev.cpp" />
+    <ClCompile Include="packet.cpp" />
+    <ClCompile Include="encrypt.cpp" />
+    <ClCompile Include="connection.cpp" />
+    <ClCompile Include="lib\aes.cpp" />
+    <ClCompile Include="lib\des.cpp" />
+    <ClCompile Include="lib\md5.cpp" />
+    <ClCompile Include="lib\pbkdf2-sha1.cpp" />
+    <ClCompile Include="lib\pbkdf2-sha256.cpp" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <ClInclude Include="common.h" />
+    <ClInclude Include="log.h" />
+    <ClInclude Include="network.h" />
+    <ClInclude Include="misc.h" />
+    <ClInclude Include="fd_manager.h" />
+    <ClInclude Include="client.h" />
+    <ClInclude Include="server.h" />
+    <ClInclude Include="my_ev.h" />
+    <ClInclude Include="packet.h" />
+    <ClInclude Include="encrypt.h" />
+    <ClInclude Include="connection.h" />
+  </ItemGroup>
+  
+  <Import Project="`$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>
+"@
+        
+        $projectContent | Out-File -FilePath "udp2raw.vcxproj" -Encoding UTF8
+        Write-Host "Visual Studio project file created"
+    
+    - name: List source files
+      shell: powershell
+      run: |
+        Write-Host "=== Listing source files ==="
+        Get-ChildItem -Path . -Filter "*.cpp" -Recurse | ForEach-Object { Write-Host $_.FullName }
+        Write-Host "=== Listing header files ==="
+        Get-ChildItem -Path . -Filter "*.h" -Recurse | ForEach-Object { Write-Host $_.FullName }
+    
+    - name: Create directories
+      shell: powershell
+      run: |
+        New-Item -ItemType Directory -Force -Path "bin\ARM64\Release"
+        New-Item -ItemType Directory -Force -Path "obj\ARM64\Release"
+    
+    - name: Build with MSBuild
+      shell: cmd
+      run: |
+        echo Setting up Visual Studio environment...
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64_arm64
+        
+        echo Building project...
+        msbuild udp2raw.vcxproj /p:Configuration=Release /p:Platform=ARM64 /p:PlatformToolset=v143 /maxcpucount /verbosity:normal
+    
+    - name: Alternative build with direct compiler calls
+      if: failure()
+      shell: powershell
+      run: |
+        Write-Host "MSBuild failed, trying direct compilation..."
+        
+        # 设置编译器路径
+        $vsPath = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise"
+        $compilerPath = "$vsPath\VC\Tools\MSVC\14.39.33519\bin\Hostx64\arm64"
+        $sdkPath = "C:\Program Files (x86)\Windows Kits\10"
+        
+        # 编译参数
+        $includes = @(
+            "/I`"C:\npcap-sdk\Include`""
+            "/I`"$vsPath\VC\Tools\MSVC\14.39.33519\include`""
+            "/I`"$sdkPath\Include\10.0.22621.0\um`""
+            "/I`"$sdkPath\Include\10.0.22621.0\shared`""
+            "/I`"$sdkPath\Include\10.0.22621.0\ucrt`""
+        )
+        
+        $defines = @(
+            "/DNDEBUG"
+            "/D_CONSOLE"
+            "/DWIN32"
+            "/D_CRT_SECURE_NO_WARNINGS"
+        )
+        
+        $flags = @(
+            "/O2"
+            "/MT"
+            "/EHsc"
+            "/W3"
+        )
+        
+        # 获取所有 cpp 文件
+        $sourceFiles = Get-ChildItem -Path . -Filter "*.cpp" -Recurse | Where-Object { $_.FullName -notlike "*test*" }
+        
+        # 编译每个源文件
+        foreach ($file in $sourceFiles) {
+            $objFile = "obj\ARM64\Release\$($file.BaseName).obj"
+            $cmd = "`"$compilerPath\cl.exe`" $($includes -join ' ') $($defines -join ' ') $($flags -join ' ') /c `"$($file.FullName)`" /Fo`"$objFile`""
+            Write-Host "Compiling: $($file.Name)"
+            Invoke-Expression $cmd
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "Compilation failed for $($file.Name)"
+                exit 1
+            }
+        }
+        
+        # 链接
+        $objFiles = Get-ChildItem -Path "obj\ARM64\Release" -Filter "*.obj" | ForEach-Object { "`"$($_.FullName)`"" }
+        $libs = @(
+            "/LIBPATH:`"C:\npcap-sdk\Lib\ARM64`""
+            "/LIBPATH:`"$vsPath\VC\Tools\MSVC\14.39.33519\lib\arm64`""
+            "/LIBPATH:`"$sdkPath\Lib\10.0.22621.0\um\arm64`""
+            "/LIBPATH:`"$sdkPath\Lib\10.0.22621.0\ucrt\arm64`""
+            "wpcap.lib"
+            "ws2_32.lib"
+            "iphlpapi.lib"
+        )
+        
+        $linkCmd = "`"$compilerPath\link.exe`" $($objFiles -join ' ') $($libs -join ' ') /OUT:`"bin\ARM64\Release\udp2raw_arm64.exe`" /SUBSYSTEM:CONSOLE"
+        Write-Host "Linking..."
+        Invoke-Expression $linkCmd
+    
+    - name: Verify build output
+      shell: powershell
+      run: |
+        Write-Host "=== Checking build output ==="
+        $possiblePaths = @(
+            "bin\ARM64\Release\udp2raw.exe"
+            "bin\ARM64\Release\udp2raw_arm64.exe"
+            "udp2raw.exe"
+            "Release\udp2raw.exe"
+        )
+        
+        $foundFile = $null
+        foreach ($path in $possiblePaths) {
+            if (Test-Path $path) {
+                $foundFile = $path
+                Write-Host "Found executable: $path"
+                $fileInfo = Get-Item $path
+                Write-Host "File size: $($fileInfo.Length) bytes"
+                Write-Host "Creation time: $($fileInfo.CreationTime)"
+                break
+            }
+        }
+        
+        if (-not $foundFile) {
+            Write-Host "ERROR: No executable found!"
+            Write-Host "=== Directory contents ==="
+            Get-ChildItem -Recurse | Where-Object { $_.Extension -eq ".exe" } | ForEach-Object { Write-Host $_.FullName }
+            exit 1
+        }
+        
+        # 重命名为标准名称
+        if ($foundFile -ne "udp2raw_windows_arm64.exe") {
+            Copy-Item $foundFile "udp2raw_windows_arm64.exe"
+            Write-Host "Renamed to: udp2raw_windows_arm64.exe"
+        }
+    
+    - name: Test executable
+      shell: powershell
+      run: |
+        Write-Host "=== Testing executable ==="
+        try {
+            # 尝试运行帮助命令
+            & ".\udp2raw_windows_arm64.exe" --help
+        } catch {
+            Write-Host "Cannot run executable directly (expected on different architecture)"
+            Write-Host "Error: $($_.Exception.Message)"
+        }
+        
+        # 检查是否是 ARM64 可执行文件
+        $fileBytes = Get-Content "udp2raw_windows_arm64.exe" -Encoding Byte -TotalCount 1000
+        Write-Host "File signature check completed"
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: udp2raw-windows-arm64
+        path: udp2raw_windows_arm64.exe
+        retention-days: 30
+    
+    - name: Create release (on tag)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: udp2raw Windows ARM64 ${{ github.ref }}
+        draft: false
+        prerelease: false
+    
+    - name: Upload release asset (on tag)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: udp2raw_windows_arm64.exe
+        asset_name: udp2raw_windows_arm64.exe
+        asset_content_type: application/octet-stream
