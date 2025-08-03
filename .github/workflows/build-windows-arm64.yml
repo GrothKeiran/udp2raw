@@ -10,36 +10,48 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    
-    defaults:
-      run:
-        shell: msys2 {0}
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # 步骤 2：安装 MSYS2 和必要的编译工具
-    - name: Setup MSYS2
+    # 步骤 2：安装正确的交叉编译工具链
+    # 我们使用 MINGW64 环境，因为它是在 x86_64 主机上运行的。
+    # 然后我们安装一个可以生成 aarch64 (ARM64) 代码的 Clang 工具链。
+    - name: Setup MSYS2 cross-compilation environment
       uses: msys2/setup-msys2@v2
       with:
-        msystem: CLANGARM64
+        msystem: MINGW64 # 宿主环境是 x86_64
         update: true
         install: >-
-          git
           make
           cmake
-          mingw-w64-clang-aarch64-toolchain
+          mingw-w64-x86_64-clang # 安装能在 x86_64 上运行的 Clang
+          mingw-w64-x86_64-lld   # 安装链接器
+          mingw-w64-x86_64-compiler-rt
 
     # 步骤 3：编译 udp2raw
     - name: Build udp2raw for ARM64
+      # 使用 MINGW64 shell
+      shell: msys2 {0}
       run: |
         # 创建构建目录
         mkdir build && cd build
         
         # 运行 CMake 配置项目
-        # 移除了 -G "MinGW Makefiles" 参数，让 CMake 自动选择合适的生成器（如 Unix Makefiles）
-        cmake .. -DENABLE_SERVER=ON -DENABLE_CLIENT=OFF
+        # -DCMAKE_SYSTEM_NAME=Windows：告知 CMake 我们正在为 Windows 系统编译
+        # -DCMAKE_SYSTEM_PROCESSOR=aarch64：指定目标 CPU 架构
+        # -DCMAKE_C_COMPILER=clang：明确指定使用 clang 作为 C 编译器
+        # -DCMAKE_CXX_COMPILER=clang++：明确指定使用 clang++ 作为 C++ 编译器
+        # --target=aarch64-w64-mingw32：这是传递给 Clang 的关键参数，告诉它生成 ARM64 代码
+        cmake .. -DCMAKE_SYSTEM_NAME=Windows \
+                 -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+                 -DCMAKE_C_COMPILER=clang \
+                 -DCMAKE_CXX_COMPILER=clang++ \
+                 -DCMAKE_C_FLAGS="--target=aarch64-w64-mingw32" \
+                 -DCMAKE_CXX_FLAGS="--target=aarch64-w64-mingw32" \
+                 -DENABLE_SERVER=ON \
+                 -DENABLE_CLIENT=OFF
                  
         # 执行编译
         make
@@ -49,7 +61,6 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: udp2raw-windows-arm64-server
-        # 在 MSYS2 环境下，生成的可执行文件通常会带 .exe 后缀
         path: build/udp2raw.exe
-        if-no-files-found: error # 如果找不到文件则报错
+        if-no-files-found: error
 
