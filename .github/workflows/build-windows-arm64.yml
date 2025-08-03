@@ -3,62 +3,62 @@
 name: Build udp2raw for Windows ARM64 (Server Mode)
 
 on:
-  # 允许手动触发此工作流程
   workflow_dispatch:
-  # 也可以在推送到 main 分支时自动触发
   push:
     branches: [ "main", "master" ]
 
 jobs:
   build:
-    # 使用 Windows 虚拟机环境
     runs-on: windows-latest
     
+    # 设置默认的 shell 为 msys2，这样后续步骤可以直接使用 msys2 环境
+    defaults:
+      run:
+        shell: msys2 {0}
+
     steps:
-    # 第一步：检出您的代码
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # 第二步：安装 MSYS2 环境
-    # MSYS2 提供了在 Windows 上进行交叉编译所需的工具链和库
+    # 步骤 2：安装 MSYS2 和必要的编译工具
+    # 在这里我们明确地加入 `cmake` 和 `make`
     - name: Setup MSYS2
       uses: msys2/setup-msys2@v2
       with:
-        # 更新 MSYS2 包数据库
+        msystem: CLANGARM64  # 指定使用 AArch64 (ARM64) 的 Clang 环境
         update: true
-        # 安装交叉编译工具链
         install: >-
+          git
+          make
+          cmake
           mingw-w64-clang-aarch64-toolchain
-          mingw-w64-clang-aarch64-cmake
-          mingw-w64-clang-aarch64-make
 
-    # 第三步：编译 udp2raw
-    # 使用 MSYS2 的 shell 环境来执行编译命令
+    # 步骤 3：编译 udp2raw
+    # 由于设置了默认 shell，这里不再需要 `shell: msys2 {0}`
     - name: Build udp2raw for ARM64
-      shell: msys2 {0}
       run: |
-        # 创建一个构建目录
+        # 创建构建目录
         mkdir build && cd build
         
-        # 运行 CMake 来配置项目
-        # -DCMAKE_TOOLCHAIN_FILE: 指定交叉编译工具链文件
-        # -DENABLE_SERVER=ON: 明确启用服务器模式（这是默认选项，但显式指定更清晰）
-        # -DENABLE_CLIENT=OFF: 禁用客户端模式，以确保只编译服务器功能
+        # 运行 CMake 配置项目
+        # -G "MinGW Makefiles" 指定使用 MinGW 的 makefile 生成器
+        # CMAKE_TOOLCHAIN_FILE 变量现在由 msys2/setup-msys2 自动设置
         cmake .. -G "MinGW Makefiles" \
-                 -DCMAKE_TOOLCHAIN_FILE=$MSYSYSTEM/share/clang-aarch64-cmake/toolchain.cmake \
                  -DENABLE_SERVER=ON \
                  -DENABLE_CLIENT=OFF
                  
         # 执行编译
         make
 
-    # 第四步：上传编译好的可执行文件
-    # 将生成的 udp2raw_arm64.exe 文件作为构建产物上传
+    # 步骤 4：上传编译产物
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        # 构建产物的名称
         name: udp2raw-windows-arm64-server
-        # 要上传的文件路径
-        path: build/udp2raw_arm64.exe
+        # 注意：udp2raw 的 CMakeLists.txt 可能会将输出文件命名为 udp2raw.exe
+        # 我们在这里同时匹配 udp2raw.exe 和 udp2raw_arm64.exe 以确保能上传成功
+        path: |
+          build/udp2raw.exe
+          build/udp2raw_arm64.exe
+        if-no-files-found: error # 如果找不到文件则报错
 
