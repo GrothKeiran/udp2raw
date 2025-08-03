@@ -20,20 +20,34 @@ jobs:
     - name: Setup MSYS2
       uses: msys2/setup-msys2@v2
       with:
-        msystem: CLANG64
+        msystem: MINGW64
         update: true
         install: >-
-          mingw-w64-clang-aarch64-toolchain
-          mingw-w64-clang-aarch64-gcc
-          mingw-w64-clang-aarch64-gcc-libs
-          mingw-w64-clang-aarch64-make
-          mingw-w64-clang-aarch64-cmake
-          make
+          base-devel
           git
+          make
+          mingw-w64-x86_64-toolchain
+          mingw-w64-x86_64-gcc
+          mingw-w64-cross-gcc
+          mingw-w64-cross-binutils
+
+    - name: Install ARM64 cross compiler
+      shell: msys2 {0}
+      run: |
+        # 下载并安装llvm-mingw交叉编译工具链
+        curl -L -o llvm-mingw.tar.xz https://github.com/mstorsjo/llvm-mingw/releases/download/20231128/llvm-mingw-20231128-ucrt-x86_64.tar.xz
+        tar -xf llvm-mingw.tar.xz
+        mv llvm-mingw-* /c/llvm-mingw
+        
+        # 验证安装
+        /c/llvm-mingw/bin/aarch64-w64-mingw32-gcc --version
 
     - name: Build udp2raw for Windows ARM64
       shell: msys2 {0}
       run: |
+        # 添加交叉编译器到PATH
+        export PATH="/c/llvm-mingw/bin:$PATH"
+        
         # 设置交叉编译环境变量
         export CC=aarch64-w64-mingw32-gcc
         export CXX=aarch64-w64-mingw32-g++
@@ -41,56 +55,58 @@ jobs:
         export STRIP=aarch64-w64-mingw32-strip
         export RANLIB=aarch64-w64-mingw32-ranlib
         
-        # 添加编译标志
-        export CFLAGS="-static -O2"
-        export CXXFLAGS="-static -O2"
-        export LDFLAGS="-static -static-libgcc -static-libstdc++"
+        # 验证编译器可用
+        which $CC
+        $CC --version
         
-        # 编译
-        make cross3 -j$(nproc)
+        # 生成版本信息
+        echo "const char * gitversion=\"$(git describe --tags --always --dirty)\";" > git_version.h
         
-        # 重命名输出文件
-        if [ -f "udp2raw_cross3" ]; then
-          mv udp2raw_cross3 udp2raw_windows_arm64.exe
-        elif [ -f "udp2raw" ]; then
-          mv udp2raw udp2raw_windows_arm64.exe
-        fi
-        
-        # 验证文件是否生成
-        ls -la *.exe || echo "No exe files found"
-        
-        # 显示文件信息
-        if [ -f "udp2raw_windows_arm64.exe" ]; then
-          file udp2raw_windows_arm64.exe
-          ls -lh udp2raw_windows_arm64.exe
-        fi
-
-    - name: Alternative build method (if main build fails)
-      shell: msys2 {0}
-      if: failure()
-      run: |
-        echo "Trying alternative build method..."
-        
-        # 清理之前的构建
-        make clean || true
-        
-        # 尝试直接使用 g++ 编译
-        aarch64-w64-mingw32-g++ -static -O2 -std=c++11 \
+        # 直接编译所有源文件
+        $CXX -static -O2 -std=c++11 \
           -DUDP2RAW_VERSION=\"$(git describe --tags --always)\" \
           -I. \
-          *.cpp \
+          main.cpp \
+          lib/md5.cpp \
+          lib/pbkdf2-sha1.cpp \
+          lib/pbkdf2-sha256.cpp \
+          encrypt.cpp \
+          log.cpp \
+          network.cpp \
+          common.cpp \
+          connection.cpp \
+          misc.cpp \
+          fd_manager.cpp \
+          client.cpp \
+          server.cpp \
+          lib/aes_faster_c/aes.cpp \
+          lib/aes_faster_c/wrapper.cpp \
+          my_ev.cpp \
           -o udp2raw_windows_arm64.exe \
-          -lws2_32 -lwinmm -static-libgcc -static-libstdc++
+          -lws2_32 -lwinmm -static-libgcc -static-libstdc++ \
+          -Wl,--gc-sections -s
         
-        # 验证文件
+        # 验证文件生成
         if [ -f "udp2raw_windows_arm64.exe" ]; then
-          echo "Alternative build successful!"
-          file udp2raw_windows_arm64.exe
+          echo "Build successful!"
           ls -lh udp2raw_windows_arm64.exe
+          file udp2raw_windows_arm64.exe
         else
-          echo "Alternative build also failed"
+          echo "Build failed - no exe file generated"
           exit 1
         fi
+
+    - name: Test executable (basic check)
+      shell: cmd
+      run: |
+        REM 只做基本的文件检查，因为ARM64程序无法在x64 runner上运行
+        if exist udp2raw_windows_arm64.exe (
+          echo File exists and has size:
+          dir udp2raw_windows_arm64.exe
+        ) else (
+          echo ERROR: Executable not found
+          exit /b 1
+        )
 
     - name: Create release info
       shell: msys2 {0}
@@ -98,9 +114,12 @@ jobs:
         echo "Build Date: $(date)" > release_info.txt
         echo "Commit: $(git rev-parse HEAD)" >> release_info.txt
         echo "Branch: $(git branch --show-current)" >> release_info.txt
+        echo "Target: Windows ARM64" >> release_info.txt
         if [ -f "udp2raw_windows_arm64.exe" ]; then
           echo "File Size: $(stat -c%s udp2raw_windows_arm64.exe) bytes" >> release_info.txt
+          echo "SHA256: $(sha256sum udp2raw_windows_arm64.exe | cut -d' ' -f1)" >> release_info.txt
         fi
+        cat release_info.txt
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
@@ -120,5 +139,16 @@ jobs:
           release_info.txt
         draft: false
         prerelease: false
+        body: |
+          Windows ARM64 build of udp2raw
+          
+          **Installation:**
+          1. Download `udp2raw_windows_arm64.exe`
+          2. Run on Windows ARM64 devices
+          
+          **Build Info:**
+          - Target: Windows ARM64
+          - Compiler: LLVM-MinGW
+          - Static linking: Yes
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
